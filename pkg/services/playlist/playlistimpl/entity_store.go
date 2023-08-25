@@ -58,9 +58,9 @@ func (s *entityStoreImpl) sync() {
 		_, _ = s.store.Write(ctx, &entity.WriteEntityRequest{
 			Entity: &entity.Entity{
 				GRN: &grn.GRN{
-					TenantID: info.OrgID,
-					ResourceIdentifier:      info.UID,
-					ResourceKind:     entity.StandardKindPlaylist,
+					TenantID:           info.OrgID,
+					ResourceIdentifier: info.UID,
+					ResourceKind:       entity.StandardKindPlaylist,
 				},
 				Body: body,
 			},
