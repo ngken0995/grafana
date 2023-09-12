@@ -434,4 +434,8 @@ const (
 	// FlagAlertingInsights
 	// Show the new alerting insights landing page
 	FlagAlertingInsights = "alertingInsights"
+
+	// FlagIdToken
+	// Generate id token for identity that can be forwarded to plugins and external services
+	FlagIdToken = "idToken"
 )

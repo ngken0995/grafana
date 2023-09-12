@@ -744,5 +744,12 @@ var (
 			Stage:        FeatureStageExperimental,
 			Owner:        grafanaAlertingSquad,
 		},
+		{
+			Name:            "idToken",
+			Description:     "Generate id token for identity that can be forwarded to plugins and external services",
+			Stage:           FeatureStageExperimental,
+			RequiresDevMode: true,
+			Owner:           grafanaAuthnzSquad,
+		},
 	}
 )

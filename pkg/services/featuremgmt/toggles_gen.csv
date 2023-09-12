@@ -106,3 +106,4 @@ sseGroupByDatasource,experimental,@grafana/observability-metrics,false,false,fal
 requestInstrumentationStatusSource,experimental,@grafana/plugins-platform-backend,false,false,false,false
 wargamesTesting,experimental,@grafana/hosted-grafana-team,false,false,false,false
 alertingInsights,experimental,@grafana/alerting-squad,false,false,false,true
+idToken,experimental,@grafana/grafana-authnz-team,true,false,false,false
