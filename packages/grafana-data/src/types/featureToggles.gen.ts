@@ -125,4 +125,5 @@ export interface FeatureToggles {
   requestInstrumentationStatusSource?: boolean;
   wargamesTesting?: boolean;
   alertingInsights?: boolean;
+  httpSLOLevels?: boolean;
 }
