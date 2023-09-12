@@ -442,4 +442,8 @@ const (
 	// FlagAlertingInsights
 	// Show the new alerting insights landing page
 	FlagAlertingInsights = "alertingInsights"
+
+	// FlagPanelTitleSearchInV1
+	// Enable searching for dashboards using panel title in search v1
+	FlagPanelTitleSearchInV1 = "panelTitleSearchInV1"
 )
