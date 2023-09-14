@@ -28,7 +28,9 @@ var folders = [][]any{
 	{1, "10", "2 WAY RADIOS", time.Now(), time.Now(), "6", 17, 18},
 }
 
-func loadFolders(t *testing.T, storeDB db.DB, storeLeftRight bool) {
+// storeFolders stores the folders in the database.
+// if storeLeftRight is true, the left and right values are stored as well.
+func storeFolders(t *testing.T, storeDB db.DB, storeLeftRight bool) {
 	t.Helper()
 
 	storeDB.WithDbSession(context.Background(), func(sess *db.Session) error {
@@ -63,7 +65,7 @@ func TestIntegrationMigrate(t *testing.T) {
 	sqlStore := sqlstore.InitTestDB(t)
 
 	folderStore := ProvideHierarchicalStore(sqlStore)
-	loadFolders(t, folderStore.db, false)
+	storeFolders(t, folderStore.db, false)
 
 	_, err := folderStore.migrate(context.Background(), 1, nil, 0)
 	require.NoError(t, err)
@@ -89,7 +91,7 @@ func TestIntegrationGetParentsMPTT(t *testing.T) {
 
 	sqlStore := sqlstore.InitTestDB(t)
 	folderStore := ProvideHierarchicalStore(sqlStore)
-	loadFolders(t, folderStore.db, true)
+	storeFolders(t, folderStore.db, true)
 
 	ancestors, err := folderStore.GetParents(context.Background(), folder.GetParentsQuery{
 		OrgID: 1,
