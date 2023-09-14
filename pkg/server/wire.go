@@ -113,6 +113,8 @@ import (
 	"github.com/grafana/grafana/pkg/services/serviceaccounts"
 	serviceaccountsmanager "github.com/grafana/grafana/pkg/services/serviceaccounts/manager"
 	serviceaccountsretriever "github.com/grafana/grafana/pkg/services/serviceaccounts/retriever"
+	"github.com/grafana/grafana/pkg/services/serviceauth"
+	"github.com/grafana/grafana/pkg/services/serviceauth/serviceauthreg"
 	"github.com/grafana/grafana/pkg/services/shorturls"
 	"github.com/grafana/grafana/pkg/services/shorturls/shorturlimpl"
 	"github.com/grafana/grafana/pkg/services/signingkeys"
@@ -352,6 +354,8 @@ var wireBasicSet = wire.NewSet(
 	supportbundlesimpl.ProvideService,
 	oasimpl.ProvideService,
 	wire.Bind(new(oauthserver.OAuth2Server), new(*oasimpl.OAuth2ServiceImpl)),
+	serviceauthreg.ProvideServiceAuthRegistry,
+	wire.Bind(new(serviceauth.ExternalServiceRegistry), new(*serviceauthreg.Registry)),
 	loggermw.Provide,
 	signingkeysimpl.ProvideEmbeddedSigningKeysService,
 	wire.Bind(new(signingkeys.Service), new(*signingkeysimpl.Service)),
