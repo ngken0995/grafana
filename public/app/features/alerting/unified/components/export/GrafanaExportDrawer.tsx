@@ -16,12 +16,19 @@ interface GrafanaExportDrawerProps {
   onTabChange: (tab: RuleExportFormats) => void;
   children: React.ReactNode;
   onClose: () => void;
+  title?: string;
 }
 
-export function GrafanaExportDrawer({ activeTab, onTabChange, children, onClose }: GrafanaExportDrawerProps) {
+export function GrafanaExportDrawer({
+  activeTab,
+  onTabChange,
+  children,
+  onClose,
+  title = 'Export',
+}: GrafanaExportDrawerProps) {
   return (
     <Drawer
-      title="Export"
+      title={title}
       subtitle="Select the format and download the file or copy the contents to clipboard"
       tabs={
         <RuleInspectorTabs<RuleExportFormats>
