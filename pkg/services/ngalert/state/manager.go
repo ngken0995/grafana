@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/benbjohnson/clock"
@@ -21,6 +22,7 @@ import (
 var (
 	ResendDelay           = 30 * time.Second
 	MetricsScrapeInterval = 15 * time.Second // TODO: parameterize? // Setting to a reasonable default scrape interval for Prometheus.
+	JPsFF                 = true
 )
 
 // AlertInstanceManager defines the interface for querying the current alert instances.
@@ -46,6 +48,9 @@ type Manager struct {
 	doNotSaveNormalState           bool
 	maxStateSaveConcurrency        int
 	applyNoDataAndErrorToAllStates bool
+
+	stateRunnerShutdown chan interface{}
+	stateRunnerWG       sync.WaitGroup
 }
 
 type ManagerCfg struct {
@@ -82,12 +87,16 @@ func NewManager(cfg ManagerCfg) *Manager {
 		maxStateSaveConcurrency:        cfg.MaxStateSaveConcurrency,
 		applyNoDataAndErrorToAllStates: cfg.ApplyNoDataAndErrorToAllStates,
 		tracer:                         cfg.Tracer,
+		stateRunnerShutdown:            make(chan interface{}, 1),
 	}
 }
 
 func (st *Manager) Run(ctx context.Context) error {
 	if st.applyNoDataAndErrorToAllStates {
 		st.log.Info("Running in alternative execution of Error/NoData mode")
+	}
+	if JPsFF {
+		st.startSync(ctx)
 	}
 	ticker := st.clock.Ticker(MetricsScrapeInterval)
 	for {
@@ -98,9 +107,63 @@ func (st *Manager) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			st.log.Debug("Stopping")
 			ticker.Stop()
+			st.stateRunnerShutdown <- struct{}{}
+			st.stateRunnerWG.Wait()
 			return ctx.Err()
 		}
 	}
+}
+
+func (st *Manager) startSync(ctx context.Context) {
+	st.stateRunnerWG.Add(1)
+	go func(ctx context.Context) {
+		ticker := st.clock.Ticker(time.Minute * 5)
+	infLoop:
+		for {
+			select {
+			case <-ticker.C:
+				if err := st.fullSync(ctx); err != nil {
+					st.log.Error("Failed to do a full state sync to database", "err", err)
+				}
+			case <-st.stateRunnerShutdown:
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+				if err := st.fullSync(shutdownCtx); err != nil {
+					st.log.Error("Failed to do a full state sync to database", "err", err)
+				}
+				cancel()
+				ticker.Stop()
+				break infLoop
+			}
+		}
+		st.log.Info("State sync shut down")
+		st.stateRunnerWG.Done()
+	}(ctx)
+}
+
+func (st *Manager) fullSync(ctx context.Context) error {
+	var instances []ngModels.AlertInstance
+	for _, rule := range st.cache.states {
+		for _, ruleState := range rule {
+			for _, s := range ruleState.states {
+				key, err := s.GetAlertInstanceKey()
+				if err != nil {
+					st.log.Warn("Failed to get alert instance key during full sync, skipping instance", "err", err)
+					continue
+				}
+				instance := ngModels.AlertInstance{
+					AlertInstanceKey:  key,
+					Labels:            ngModels.InstanceLabels(s.Labels),
+					CurrentState:      ngModels.InstanceStateType(s.State.String()),
+					CurrentReason:     s.StateReason,
+					LastEvalTime:      s.LastEvaluationTime,
+					CurrentStateSince: s.StartsAt,
+					CurrentStateEnd:   s.EndsAt,
+				}
+				instances = append(instances, instance)
+			}
+		}
+	}
+	return st.instanceStore.FullSync(ctx, instances)
 }
 
 func (st *Manager) Warm(ctx context.Context, rulesReader RuleReader) {
@@ -277,22 +340,23 @@ func (st *Manager) ProcessEvalResults(ctx context.Context, evaluatedAt time.Time
 		})
 
 	staleStates := st.deleteStaleStatesFromCache(ctx, logger, evaluatedAt, alertRule)
-	st.deleteAlertStates(tracingCtx, logger, staleStates)
 
-	if len(staleStates) > 0 {
-		span.AddEvents([]string{"message", "state_transitions"},
+	if !JPsFF {
+		st.deleteAlertStates(tracingCtx, logger, staleStates)
+		if len(staleStates) > 0 {
+			span.AddEvents([]string{"message", "state_transitions"},
+				[]tracing.EventValue{
+					{Str: "deleted stale states"},
+					{Num: int64(len(staleStates))},
+				})
+		}
+
+		st.saveAlertStates(tracingCtx, logger, states...)
+		span.AddEvents([]string{"message"},
 			[]tracing.EventValue{
-				{Str: "deleted stale states"},
-				{Num: int64(len(staleStates))},
+				{Str: "updated database"},
 			})
 	}
-
-	st.saveAlertStates(tracingCtx, logger, states...)
-
-	span.AddEvents([]string{"message"},
-		[]tracing.EventValue{
-			{Str: "updated database"},
-		})
 
 	allChanges := append(states, staleStates...)
 	if st.historian != nil {
