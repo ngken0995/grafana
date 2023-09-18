@@ -75,7 +75,6 @@ Some features are enabled by default. You can disable these feature by setting t
 | `splitScopes`                    | Support faster dashboard and folder search by splitting permission scopes into parts                                                                                                         |
 | `reportingRetries`               | Enables rendering retries for the reporting feature                                                                                                                                          |
 | `newBrowseDashboards`            | New browse/manage dashboards UI                                                                                                                                                              |
-| `httpSLOLevels`                  | Adds SLO level to http request metrics                                                                                                                                                       |
 
 ## Experimental feature toggles
 
@@ -136,6 +135,7 @@ Experimental features might be changed or removed without prior notice.
 | `requestInstrumentationStatusSource`        | Include a status source label for request metrics and logs                                                   |
 | `wargamesTesting`                           | Placeholder feature flag for internal testing                                                                |
 | `alertingInsights`                          | Show the new alerting insights landing page                                                                  |
+| `httpSLOLevels`                             | Adds SLO level to http request metrics                                                                       |
 
 ## Development feature toggles
 
