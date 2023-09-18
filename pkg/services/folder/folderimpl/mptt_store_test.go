@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/services/folder"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
@@ -48,7 +47,6 @@ func storeFolders(t *testing.T, storeDB db.DB, storeLeftRight bool) {
 			sqlOrArgs = append(sqlOrArgs, folders[i][:len(cols)]...)
 		}
 		sqlOrArgs = append([]any{sql}, sqlOrArgs...)
-		spew.Dump(">>>>", sqlOrArgs)
 
 		_, err := sess.Exec(sqlOrArgs...)
 		require.NoError(t, err)
@@ -82,6 +80,22 @@ func TestIntegrationMigrate(t *testing.T) {
 		assert.Equal(t, folders[i][6], int(r[i].Lft))
 		assert.Equal(t, folders[i][7], int(r[i].Rgt))
 	}
+
+	tree, err := folderStore.getTree(context.Background(), 1)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		"1-ELECTRONICS",
+		"2-TELEVISIONS",
+		"3-TUBE",
+		"3-LCD",
+		"3-PLASMA",
+		"2-PORTABLE ELECTRONICS",
+		"3-MP3 PLAYERS",
+		"4-FLASH",
+		"3-CD PLAYERS",
+		"3-2 WAY RADIOS",
+	}, tree)
 }
 
 func TestIntegrationGetParentsMPTT(t *testing.T) {
@@ -105,3 +119,199 @@ func TestIntegrationGetParentsMPTT(t *testing.T) {
 		assert.Equal(t, expected[i], ancestors[i].Title)
 	}
 }
+
+func TestIntegrationCreateMPTT(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	testCases := []struct {
+		desc         string
+		expectedTree []string
+		parentUID    string
+	}{
+		{
+			desc:      "create folder under root",
+			parentUID: "",
+			expectedTree: []string{
+				"1-ELECTRONICS",
+				"2-TELEVISIONS",
+				"3-TUBE",
+				"3-LCD",
+				"3-PLASMA",
+				"2-PORTABLE ELECTRONICS",
+				"3-MP3 PLAYERS",
+				"4-FLASH",
+				"3-CD PLAYERS",
+				"3-2 WAY RADIOS",
+				"1-NEW FOLDER",
+			},
+		},
+		{
+			desc:      "create folder under TELEVISIONS",
+			parentUID: "2",
+			expectedTree: []string{
+				"1-ELECTRONICS",
+				"2-TELEVISIONS",
+				"3-TUBE",
+				"3-LCD",
+				"3-PLASMA",
+				"3-NEW FOLDER",
+				"2-PORTABLE ELECTRONICS",
+				"3-MP3 PLAYERS",
+				"4-FLASH",
+				"3-CD PLAYERS",
+				"3-2 WAY RADIOS",
+			},
+		},
+		{
+			desc:      "create folder under TUBE",
+			parentUID: "3",
+			expectedTree: []string{
+				"1-ELECTRONICS",
+				"2-TELEVISIONS",
+				"3-TUBE",
+				"4-NEW FOLDER",
+				"3-LCD",
+				"3-PLASMA",
+				"2-PORTABLE ELECTRONICS",
+				"3-MP3 PLAYERS",
+				"4-FLASH",
+				"3-CD PLAYERS",
+				"3-2 WAY RADIOS",
+			},
+		},
+		{
+			desc:      "create folder under FLASH",
+			parentUID: "8",
+			expectedTree: []string{
+				"1-ELECTRONICS",
+				"2-TELEVISIONS",
+				"3-TUBE",
+				"3-LCD",
+				"3-PLASMA",
+				"2-PORTABLE ELECTRONICS",
+				"3-MP3 PLAYERS",
+				"4-FLASH",
+				"5-NEW FOLDER",
+				"3-CD PLAYERS",
+				"3-2 WAY RADIOS",
+			},
+		},
+		{
+			desc:      "create folder under ELECTRONICS",
+			parentUID: "1",
+			expectedTree: []string{
+				"1-ELECTRONICS",
+				"2-TELEVISIONS",
+				"3-TUBE",
+				"3-LCD",
+				"3-PLASMA",
+				"2-PORTABLE ELECTRONICS",
+				"3-MP3 PLAYERS",
+				"4-FLASH",
+				"3-CD PLAYERS",
+				"3-2 WAY RADIOS",
+				"2-NEW FOLDER",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			sqlStore := sqlstore.InitTestDB(t)
+			folderStore := ProvideHierarchicalStore(sqlStore)
+			storeFolders(t, folderStore.db, true)
+
+			_, err := folderStore.Create(context.Background(), folder.CreateFolderCommand{
+				OrgID:     1,
+				UID:       "22",
+				Title:     "NEW FOLDER",
+				ParentUID: tc.parentUID,
+			})
+			require.NoError(t, err)
+
+			tree, err := folderStore.getTree(context.Background(), 1)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.expectedTree, tree)
+		})
+	}
+}
+
+/*
+func TestIntegrationGetHeightMPTT(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	testCases := []struct {
+		desc     string
+		uid      string
+		expected int
+	}{
+		{
+			desc:     "get height of ELECTRONICS",
+			uid:      "1",
+			expected: 2,
+		},
+		{
+			desc:     "get height of TELEVISIONS",
+			uid:      "2",
+			expected: 1,
+		},
+		{
+			desc:     "get height of TUBE",
+			uid:      "3",
+			expected: 0,
+		},
+		{
+			desc:     "get height of LCD",
+			uid:      "4",
+			expected: 0,
+		},
+		{
+			desc:     "get height of PLASMA",
+			uid:      "5",
+			expected: 0,
+		},
+		{
+			desc:     "get height of PORTABLE ELECTRONICS",
+			uid:      "6",
+			expected: 2,
+		},
+		{
+			desc:     "get height of MP3 PLAYERS",
+			uid:      "7",
+			expected: 1,
+		},
+		{
+			desc:     "get height of FLASH",
+			uid:      "8",
+			expected: 0,
+		},
+		{
+			desc:     "get height of CD PLAYERS",
+			uid:      "9",
+			expected: 0,
+		},
+		{
+			desc:     "get height of 2 WAY RADIOS",
+			uid:      "10",
+			expected: 0,
+		},
+	}
+
+	sqlStore := sqlstore.InitTestDB(t)
+	folderStore := ProvideHierarchicalStore(sqlStore)
+	storeFolders(t, folderStore.db, true)
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			height, err := folderStore.GetHeight(context.Background(), tc.uid, 1, nil)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, height)
+		})
+	}
+}
+*/

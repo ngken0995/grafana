@@ -2,8 +2,11 @@ package folderimpl
 
 import (
 	"context"
+	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/grafana/grafana/pkg/infra/db"
+	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/folder"
 )
 
@@ -28,11 +31,14 @@ func (h *HierarchicalEntity[T]) GetEntity() T {
 */
 
 type HierarchicalStore struct {
-	db db.DB
+	db        db.DB
+	log       log.Logger
+	table     string
+	parentCol string
 }
 
 func ProvideHierarchicalStore(db db.DB) *HierarchicalStore {
-	store := &HierarchicalStore{db: db}
+	store := &HierarchicalStore{db: db, table: "folder", parentCol: "parent_uid", log: log.New("folder-store-mptt")}
 
 	//store.populateLeftRightCols(1, nil, 0, 0)
 	return store
@@ -99,7 +105,70 @@ func (hs *HierarchicalStore) migrate(ctx context.Context, orgID int64, f *folder
 }
 
 func (hs *HierarchicalStore) Create(ctx context.Context, cmd folder.CreateFolderCommand) (*folder.Folder, error) {
-	panic("not implemented")
+	if cmd.UID == "" {
+		return nil, folder.ErrBadRequest.Errorf("missing UID")
+	}
+
+	// TODO: fix concurrency
+	foldr := &folder.Folder{}
+	now := time.Now()
+	if err := hs.db.InTransaction(ctx, func(ctx context.Context) error {
+		if err := hs.db.WithDbSession(ctx, func(sess *db.Session) error {
+			if cmd.ParentUID == "" {
+				maxRgt := 0
+				if _, err := sess.SQL("SELECT  MAX(rgt) FROM folder WHERE org_id = ?", cmd.OrgID).Get(&maxRgt); err != nil {
+					spew.Dump(">>>> 1", err)
+					return err
+				}
+
+				if _, err := sess.Exec("INSERT INTO folder(org_id, uid, title, created, updated, parent_uid, lft, rgt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", cmd.OrgID, cmd.UID, cmd.Title, now, now, cmd.ParentUID, maxRgt+1, maxRgt+2); err != nil {
+					spew.Dump(">>>> 3", err)
+					return err
+				}
+				return nil
+			}
+
+			var parentRgt int64
+			if _, err := sess.SQL("SELECT rgt FROM folder WHERE uid = ? AND org_id = ?", cmd.ParentUID, cmd.OrgID).Get(&parentRgt); err != nil {
+				return err
+			}
+
+			if r, err := sess.Exec("UPDATE folder SET rgt = rgt + 2 WHERE rgt >= ? AND org_id = ?", parentRgt, cmd.OrgID); err != nil {
+				if rowsAffected, err := r.RowsAffected(); err == nil {
+					hs.log.Info("Updated rgt column in folder table", "rowsAffected", rowsAffected)
+				}
+				return err
+			}
+
+			if r, err := sess.Exec("UPDATE folder SET lft = lft + 2 WHERE lft > ? AND org_id = ?", parentRgt, cmd.OrgID); err != nil {
+				if rowsAffected, err := r.RowsAffected(); err == nil {
+					hs.log.Info("Updated lft column in folder table", "rowsAffected", rowsAffected)
+				}
+				return err
+			}
+
+			if _, err := sess.Exec("INSERT INTO folder(org_id, uid, title, created, updated, parent_uid, lft, rgt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", cmd.OrgID, cmd.UID, cmd.Title, now, now, cmd.ParentUID, parentRgt, parentRgt+1); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		if err := hs.db.WithDbSession(ctx, func(sess *db.Session) error {
+			if _, err := sess.SQL("SELECT * FROM folder WHERE uid = ? AND org_id = ?", cmd.UID, cmd.OrgID).Get(foldr); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return foldr, err
+	}
+
+	return foldr, nil
 }
 
 func (hs *HierarchicalStore) Delete(ctx context.Context, uid string, orgID int64) error {
@@ -117,12 +186,14 @@ func (hs *HierarchicalStore) Get(ctx context.Context, cmd folder.GetFolderQuery)
 func (hs *HierarchicalStore) GetParents(ctx context.Context, cmd folder.GetParentsQuery) ([]*folder.Folder, error) {
 	var folders []*folder.Folder
 	err := hs.db.WithDbSession(ctx, func(sess *db.Session) error {
-		if err := sess.SQL(`SELECT parent.*
+		if err := sess.SQL(`
+		SELECT parent.*
 		FROM folder AS node,
 			folder AS parent
 		WHERE node.lft > parent.lft AND node.lft < parent.rgt
 			AND node.org_id = ? AND node.uid = ?
-		ORDER BY node.lft`, cmd.OrgID, cmd.UID).Find(&folders); err != nil {
+		ORDER BY node.lft
+		`, cmd.OrgID, cmd.UID).Find(&folders); err != nil {
 			return err
 		}
 		return nil
@@ -137,6 +208,54 @@ func (hs *HierarchicalStore) GetChildren(ctx context.Context, cmd folder.GetChil
 	panic("not implemented")
 }
 
+/*
 func (hs *HierarchicalStore) GetHeight(ctx context.Context, foldrUID string, orgID int64, parentUID *string) (int, error) {
-	panic("not implemented")
+	var height int
+	err := hs.db.WithDbSession(ctx, func(sess *db.Session) error {
+		if _, err := sess.SQL(`
+		SELECT MAX(COUNT(parent.uid) - (sub_tree.depth + 1))
+		FROM folder AS node,
+			folder AS parent,
+			folder AS sub_parent,
+			(
+				SELECT node.uid, (COUNT(parent.uid) - 1) AS depth
+				FROM folder AS node,
+				folder AS parent
+				WHERE node.lft > parent.lft AND node.lft < parent.rgt
+				AND node.org_id = ? AND node.uid = ?
+				GROUP BY node.title
+				ORDER BY node.lft
+			)AS sub_tree
+		WHERE node.lft > parent.lft AND node.lft < parent.rgt
+			AND node.lft > sub_parent.lft AND node.lft < sub_parent.rgt
+			AND sub_parent.name = sub_tree.name
+		GROUP BY node.name
+		ORDER BY node.lft
+		`, orgID, foldrUID).Get(&height); err != nil {
+			return err
+		}
+		return nil
+	})
+	return height, err
+}
+*/
+
+func (hs *HierarchicalStore) getTree(ctx context.Context, orgID int64) ([]string, error) {
+	var tree []string
+	err := hs.db.WithDbSession(ctx, func(sess *db.Session) error {
+		if err := sess.SQL(`
+		SELECT COUNT(parent.title) || '-' || node.title
+		FROM folder AS node, folder AS parent
+		WHERE node.lft BETWEEN parent.lft AND parent.rgt AND node.org_id = ?
+		GROUP BY node.title
+		ORDER BY node.lft
+		`, orgID).Find(&tree); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tree, nil
 }
