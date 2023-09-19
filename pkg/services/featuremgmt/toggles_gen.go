@@ -426,4 +426,8 @@ const (
 	// FlagRequestInstrumentationStatusSource
 	// Include a status source label for request metrics and logs
 	FlagRequestInstrumentationStatusSource = "requestInstrumentationStatusSource"
+
+	// FlagAlertingSaveStateAsync
+	// Writes the state only on a given interval to database
+	FlagAlertingSaveStateAsync = "alertingSaveStateAsync"
 )

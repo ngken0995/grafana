@@ -222,6 +222,7 @@ func (ng *AlertNG) init() error {
 		MaxStateSaveConcurrency:        ng.Cfg.UnifiedAlerting.MaxStateSaveConcurrency,
 		ApplyNoDataAndErrorToAllStates: ng.FeatureToggles.IsEnabled(featuremgmt.FlagAlertingNoDataErrorExecution),
 		Tracer:                         ng.tracer,
+		SaveStateAsync:                 ng.FeatureToggles.IsEnabled(featuremgmt.FlagAlertingSaveStateAsync),
 	}
 	stateManager := state.NewManager(cfg)
 	scheduler := schedule.NewScheduler(schedCfg, stateManager)

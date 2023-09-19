@@ -730,5 +730,12 @@ var (
 			FrontendOnly: false,
 			Owner:        grafanaPluginsPlatformSquad,
 		},
+		{
+			Name:         "alertingSaveStateAsync",
+			Description:  "Writes the state only on a given interval to database",
+			Stage:        FeatureStagePrivatePreview,
+			FrontendOnly: false,
+			Owner:        grafanaAlertingSquad,
+		},
 	}
 )

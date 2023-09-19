@@ -22,7 +22,6 @@ import (
 var (
 	ResendDelay           = 30 * time.Second
 	MetricsScrapeInterval = 15 * time.Second // TODO: parameterize? // Setting to a reasonable default scrape interval for Prometheus.
-	JPsFF                 = true
 )
 
 // AlertInstanceManager defines the interface for querying the current alert instances.
@@ -49,6 +48,7 @@ type Manager struct {
 	maxStateSaveConcurrency        int
 	applyNoDataAndErrorToAllStates bool
 
+	saveStateAsync      bool
 	stateRunnerShutdown chan interface{}
 	stateRunnerWG       sync.WaitGroup
 }
@@ -64,7 +64,8 @@ type ManagerCfg struct {
 	DoNotSaveNormalState bool
 	// MaxStateSaveConcurrency controls the number of goroutines (per rule) that can save alert state in parallel.
 	MaxStateSaveConcurrency int
-
+	// SaveAsnyc controls if we save the state async on a ticker or and every evaluation.
+	SaveStateAsync bool
 	// ApplyNoDataAndErrorToAllStates makes state manager to apply exceptional results (NoData and Error)
 	// to all states when corresponding execution in the rule definition is set to either `Alerting` or `OK`
 	ApplyNoDataAndErrorToAllStates bool
@@ -88,6 +89,7 @@ func NewManager(cfg ManagerCfg) *Manager {
 		applyNoDataAndErrorToAllStates: cfg.ApplyNoDataAndErrorToAllStates,
 		tracer:                         cfg.Tracer,
 		stateRunnerShutdown:            make(chan interface{}, 1),
+		saveStateAsync:                 cfg.SaveStateAsync,
 	}
 }
 
@@ -95,7 +97,7 @@ func (st *Manager) Run(ctx context.Context) error {
 	if st.applyNoDataAndErrorToAllStates {
 		st.log.Info("Running in alternative execution of Error/NoData mode")
 	}
-	if JPsFF {
+	if st.saveStateAsync {
 		st.startSync(ctx)
 	}
 	ticker := st.clock.Ticker(MetricsScrapeInterval)
@@ -341,7 +343,7 @@ func (st *Manager) ProcessEvalResults(ctx context.Context, evaluatedAt time.Time
 
 	staleStates := st.deleteStaleStatesFromCache(ctx, logger, evaluatedAt, alertRule)
 
-	if !JPsFF {
+	if !st.saveStateAsync {
 		st.deleteAlertStates(tracingCtx, logger, staleStates)
 		if len(staleStates) > 0 {
 			span.AddEvents([]string{"message", "state_transitions"},
